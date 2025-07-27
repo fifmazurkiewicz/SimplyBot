@@ -1,0 +1,1 @@
+# SimplyBot - Bot dialogowy z RAG 
