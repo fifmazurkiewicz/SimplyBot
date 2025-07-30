@@ -25,9 +25,23 @@ theme:
       toggle:
         icon: material/toggle-switch-off-outline
         name: Przełącz motyw
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
 
 plugins:
   - search
+  - git-revision-date-localized:
+      enable_creation_date: true
+  - minify:
+      minify_html: true
+  - mermaid2
+  
 
 markdown_extensions:
   - admonition
@@ -37,14 +51,26 @@ markdown_extensions:
       anchor_linenums: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  - pymdownx.arithmatex:
-      generic: true
-  - pymdownx.mermaid:
-      arguments:
-        theme: default
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - toc:
+      permalink: true
 
 nav:
   - Strona główna: index.md
   - Architektura: architecture.md
   - Instalacja: installation.md
-  - Użycie: usage.md 
+  - Użycie: usage.md
+  - API Reference: api-reference.md
+  - Rozwój: development.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/your-username/SimplyBot
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/your-discord
