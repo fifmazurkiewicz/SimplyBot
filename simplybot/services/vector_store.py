@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 import logging
 import uuid
 import numpy as np
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,8 @@ class VectorStoreService:
                 model = SentenceTransformer(Config.BGE_MODEL_NAME)
                 return model
             except Exception as e:
-                logger.error(f"Błąd podczas ładowania modelu BGE: {e}")
-                raise ValueError(f"Nie udało się załadować modelu BGE: {Config.BGE_MODEL_NAME}")
+                logger.error(f"Error loading BGE model: {e}")
+                raise ValueError(f"Failed to load BGE model: {Config.BGE_MODEL_NAME}")
         
         elif self.embedding_model == "openai":
             # Konfiguracja embeddings - OpenAI API ma priorytet (lepsze embeddings)
@@ -52,7 +53,7 @@ class VectorStoreService:
                     model=Config.OPENAI_EMBEDDING_MODEL
                 )
             else:
-                raise ValueError("Brak klucza API dla embeddings - ustaw OPENAI_API_KEY lub OPENROUTER_API_KEY")
+                raise ValueError("No API key for embeddings - set OPENAI_API_KEY or OPENROUTER_API_KEY")
         
         else:
             raise ValueError(f"Nieobsługiwany model embeddings: {self.embedding_model}")
@@ -70,7 +71,7 @@ class VectorStoreService:
         """Koduje tekst na embeddings"""
         # Logowanie tekstu do embedding
         text_preview = text[:10] + "..." if len(text) > 10 else text
-        logger.info(f"🔍 Generowanie embedding dla tekstu: '{text_preview}' (długość: {len(text)} znaków)")
+        logger.info(f"🔍 Generating embedding for text: '{text_preview}' (length: {len(text)} characters)")
         
         if self.embedding_model == "bge":
             # BGE wymaga specjalnego formatowania
@@ -104,23 +105,23 @@ class VectorStoreService:
                 )
                 logger.info(f"Utworzono kolekcję: {self.collection_name} z wymiarami: {embedding_dim}")
         except Exception as e:
-            logger.error(f"Błąd podczas tworzenia kolekcji: {e}")
+            logger.error(f"Error creating collection: {e}")
     
     async def add_documents(self, documents: List[Dict[str, Any]]) -> int:
-        """Dodaje dokumenty do vector store"""
+        """Adds documents to vector store"""
         try:
             added_count = 0
-            logger.info(f"📚 Rozpoczynam dodawanie {len(documents)} dokumentów do vector store")
+            logger.info(f"📚 Starting to add {len(documents)} documents to vector store")
             
             for i, doc in enumerate(documents):
-                # Generuj unikalny ID
+                # Generate unique ID
                 doc_id = str(uuid.uuid4())
                 
-                # Logowanie informacji o dokumencie
+                # Log document information
                 content_preview = doc["content"][:10] + "..." if len(doc["content"]) > 10 else doc["content"]
-                logger.info(f"📄 Dokument {i+1}/{len(documents)}: '{content_preview}' (źródło: {doc.get('source', 'unknown')})")
+                logger.info(f"📄 Document {i+1}/{len(documents)}: '{content_preview}' (source: {doc.get('source', 'unknown')})")
                 
-                # Przygotuj metadane
+                # Prepare metadata
                 metadata = {
                     "source": doc.get("source", "unknown"),
                     "title": doc.get("title", ""),
@@ -133,33 +134,33 @@ class VectorStoreService:
                     id=doc_id,
                     vector=self._encode_text(doc["content"]),
                     payload={
-                        "content": doc["content"],
+                        "content": doc["content"],  
                         "metadata": metadata
                     }
                 )
-                
                 self.client.upsert(
                     collection_name=self.collection_name,
-                    points=[point]
+                    points=[point],
+                    wait=True
                 )
                 added_count += 1
-                logger.info(f"✅ Dodano dokument {i+1} do Qdrant (ID: {doc_id[:8]}...)")
+                logger.info(f"✅ Added document {i+1} to Qdrant (ID: {doc_id}...)")
             
-            logger.info(f"🎉 Pomyślnie dodano {added_count} dokumentów do vector store")
+            logger.info(f"🎉 Successfully added {added_count} documents to vector store")
             return added_count
             
         except Exception as e:
-            logger.error(f"Błąd podczas dodawania dokumentów: {e}")
+            logger.error(f"Error adding documents: {e}")
             return 0
     
     async def search_documents(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Wyszukuje dokumenty podobne do zapytania"""
+        """Searches for documents similar to query"""
         try:
-            # Logowanie zapytania RAG
+            # Log RAG query
             query_preview = query[:10] + "..." if len(query) > 10 else query
-            logger.info(f"🔍 RAG WYSZUKIWANIE: '{query_preview}' (limit: {limit})")
+            logger.info(f"🔍 RAG SEARCH: '{query_preview}' (limit: {limit})")
             
-            # Wyszukaj w Qdrant
+            # Search in Qdrant
             search_result = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=self._encode_text(query),
@@ -167,11 +168,11 @@ class VectorStoreService:
                 with_payload=True
             )
             
-            # Przygotuj wyniki
+            # Prepare results
             documents = []
             for i, result in enumerate(search_result):
                 content_preview = result.payload.get("content", "")[:10] + "..." if len(result.payload.get("content", "")) > 10 else result.payload.get("content", "")
-                logger.info(f"📄 Wynik {i+1}: '{content_preview}' (score: {result.score:.4f})")
+                logger.info(f"📄 Result {i+1}: '{content_preview}' (score: {result.score:.4f})")
                 
                 doc = {
                     "content": result.payload.get("content", ""),
@@ -180,22 +181,31 @@ class VectorStoreService:
                 }
                 documents.append(doc)
             
-            logger.info(f"✅ RAG: Znaleziono {len(documents)} dokumentów dla zapytania")
+            logger.info(f"✅ RAG: Found {len(documents)} documents for query")
             return documents
             
         except Exception as e:
-            logger.error(f"Błąd podczas wyszukiwania dokumentów: {e}")
+            logger.error(f"Error searching documents: {e}")
             return []
     
     async def get_collection_info(self) -> Dict[str, Any]:
-        """Zwraca informacje o kolekcji"""
+        """Returns collection information"""
         try:
             collection_info = self.client.get_collection(self.collection_name)
+            # Check if points_count is None and replace with 0
+            points_count = collection_info.points_count if collection_info.points_count is not None else 0
+            logger.info(f"📊 Collection information: {self.collection_name}, points: {points_count}")
+            
             return {
                 "name": self.collection_name,
-                "vectors_count": collection_info.vectors_count,
+                "points_count": points_count,
                 "status": "ok"
             }
         except Exception as e:
-            logger.error(f"Błąd podczas pobierania informacji o kolekcji: {e}")
-            return {"status": "error", "message": str(e)} 
+            logger.error(f"Error retrieving collection information: {e}")
+            return {
+                "name": self.collection_name,
+                "points_count": 0,
+                "status": "error", 
+                "message": str(e)
+            } 

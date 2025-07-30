@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "simplybot"
 version = "0.1.0"
-description = "Bot dialogowy z RAG wykorzystujący LangChain, Qdrant i ElevenLabs"
+description = "RAG chatbot using LangChain, Qdrant and ElevenLabs"
 authors = ["Your Name <your.email@example.com>"]
 
 [tool.poetry.dependencies]
@@ -30,6 +30,9 @@ sentence-transformers = "^5.0.0"
 pytest = "^7.0.0"
 black = "^23.0.0"
 flake8 = "^6.0.0"
+mkdocs-material = "^9.6.16"
+mkdocs-mermaid2-plugin = "^1.2.1"
+mkdocs-awesome-pages-plugin = "^2.10.1"
 
 [build-system]
 requires = ["poetry-core"]

@@ -9,7 +9,9 @@ from simplybot.models import (
     HealthCheckResponse,
     FileInfo,
     FileListResponse,
-    FileUploadResponse
+    FileUploadResponse,
+    ConversationSummaryResponse,
+    ConversationSummaryRequest
 )
 from simplybot.services.llm_service import LLMService
 from simplybot.services.vector_store import VectorStoreService
@@ -30,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="SimplyBot API",
-    description="Bot dialogowy z RAG wykorzystujący LangChain, Qdrant i ElevenLabs",
+    description="RAG chatbot using LangChain, Qdrant and ElevenLabs",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -58,10 +60,10 @@ document_processor = DocumentProcessor()
 
 @app.get("/", response_model=HealthCheckResponse)
 async def health_check():
-    """Sprawdza stan usług"""
+    """Checks service status"""
     services = {}
     
-    # Sprawdź OpenRouter/OpenAI
+    # Check OpenRouter/OpenAI
     try:
         if Config.OPENROUTER_API_KEY:
             services["openrouter"] = "ok"
@@ -72,14 +74,14 @@ async def health_check():
     except:
         services["llm"] = "error"
     
-    # Sprawdź Qdrant
+    # Check Qdrant
     try:
-        # Najpierw sprawdź czy serwer działa
+        # First check if server is running
         client = QdrantClient(url=Config.QDRANT_URL)
         collections = client.get_collections()
         services["qdrant"] = "ok"
         
-        # Dodatkowo sprawdź kolekcję (opcjonalnie)
+        # Additionally check collection (optional)
         try:
             qdrant_info = await vector_store.get_collection_info()
             if qdrant_info.get("status") == "ok":
@@ -90,10 +92,10 @@ async def health_check():
             services["qdrant_collection"] = "not_found"
             
     except Exception as e:
-        logger.error(f"Błąd połączenia z Qdrant: {e}")
+        logger.error(f"Qdrant connection error: {e}")
         services["qdrant"] = "error"
     
-    # Sprawdź ElevenLabs
+    # Check ElevenLabs
     try:
         if Config.ELEVENLABS_API_KEY:
             services["elevenlabs"] = "ok"
@@ -102,7 +104,7 @@ async def health_check():
     except:
         services["elevenlabs"] = "error"
     
-    # Sprawdź Embeddings
+    # Check Embeddings
     try:
         services["embeddings"] = Config.EMBEDDING_MODEL
         if Config.EMBEDDING_MODEL == "bge":
@@ -118,11 +120,11 @@ async def health_check():
 
 @app.post("/get_more_information", response_model=GetMoreInformationResponse)
 async def get_more_information(request: GetMoreInformationRequest):
-    """Główny endpoint do obsługi rozmowy z botem"""
+    """Main endpoint for bot conversation handling"""
     try:
-        logger.info(f"🚀 Rozpoczynam przetwarzanie zapytania (sesja: {request.conversation.session_id})")
+        logger.info(f"🚀 Starting request processing (session: {request.conversation.session_id})")
         
-        # 1. Konwertuj rozmowę na format dla LLM
+        # 1. Convert conversation to LLM format
         conversation_messages = []
         for msg in request.conversation.messages:
             conversation_messages.append({
@@ -130,53 +132,63 @@ async def get_more_information(request: GetMoreInformationRequest):
                 "content": msg.content
             })
         
-        logger.info(f"💬 Rozmowa zawiera {len(conversation_messages)} wiadomości")
+        logger.info(f"💬 Conversation contains {len(conversation_messages)} messages")
         
-        # 2. Podsumuj rozmowę i przygotuj zapytanie do RAG
-        logger.info("🧠 KROK 1: Podsumowywanie rozmowy...")
-        summary = await llm_service.summarize_conversation(conversation_messages)
+        # 2. Summarize conversation and prepare RAG query
+        logger.info("🧠 STEP 1: Summarizing conversation...")
+        conversation_summary = await llm_service.summarize_conversation(conversation_messages)
         
-        # Wyciągnij pytanie z podsumowania
-        question = summary
-        if "PYTANIE:" in summary:
-            question = summary.split("PYTANIE:")[-1].strip()
+        logger.info(f"📊 Summary: {conversation_summary.next_action} (confidence: {conversation_summary.confidence})")
+        logger.info(f"💭 Reasoning: {conversation_summary.reasoning}")
         
+        # Check if user needs to be asked for more
+        if conversation_summary.next_action.value == "ask_user":
+            logger.info("🤔 Conversation requires user follow-up")
+            return GetMoreInformationResponse(
+                answer=f"**TLDR:** {conversation_summary.rag_query}\n\n**Opis:** {conversation_summary.conversation_summary}",
+                audio_url=None,
+                confidence=conversation_summary.confidence,
+                sources=[],
+                needs_clarification=True
+            )
+        
+        # 3. Search documents in Qdrant
+        logger.info("🔍 STEP 2: Searching documents in Qdrant...")
+        question = conversation_summary.rag_query
         question_preview = question[:10] + "..." if len(question) > 10 else question
-        logger.info(f"❓ Pytanie do RAG: '{question_preview}'")
+        logger.info(f"❓ RAG question: '{question_preview}'")
         
-        # 3. Wyszukaj dokumenty w Qdrant
-        logger.info("🔍 KROK 2: Wyszukiwanie dokumentów w Qdrant...")
         context_docs = await vector_store.search_documents(question, limit=5)
         
-        # 4. Wygeneruj odpowiedź z kontekstem
-        logger.info("🤖 KROK 3: Generowanie odpowiedzi z kontekstem...")
+        # 4. Generate response with context
+        logger.info("🤖 STEP 3: Generating response with context...")
         answer = await llm_service.answer_with_context(question, context_docs)
         
-        # 5. Generuj audio tylko dla TLDR (opcjonalnie)
+        # 5. Generate audio only for TLDR (optional)
         audio_url = None
         if Config.ELEVENLABS_API_KEY:
-            logger.info("🎵 KROK 4: Generowanie audio dla TLDR...")
+            logger.info("🎵 STEP 4: Generating audio for TLDR...")
             
-            # Wyciągnij TLDR z odpowiedzi
+            # Extract TLDR from response
             tldr_text = ""
             if "**TLDR:**" in answer:
                 tldr_part = answer.split("**Opis:**")[0]
                 tldr_text = tldr_part.replace("**TLDR:**", "").strip()
-                logger.info(f"📋 TLDR do audio: '{tldr_text[:50]}...'")
+                logger.info(f"📋 TLDR for audio: '{tldr_text[:50]}...'")
             else:
-                # Jeśli nie ma formatu TLDR, użyj całej odpowiedzi
+                # If no TLDR format, use entire response
                 tldr_text = answer
-                logger.info(f"📋 Używam całej odpowiedzi do audio: '{tldr_text[:50]}...'")
+                logger.info(f"📋 Using entire response for audio: '{tldr_text[:50]}...'")
             
             audio_url = await audio_service.generate_speech(tldr_text)
             if audio_url:
-                logger.info(f"✅ Audio wygenerowane dla TLDR: {audio_url}")
+                logger.info(f"✅ Audio generated for TLDR: {audio_url}")
             else:
-                logger.warning("⚠️ Nie udało się wygenerować audio")
+                logger.warning("⚠️ Failed to generate audio")
         else:
-            logger.info("⚠️ Pomijam generowanie audio - brak klucza ElevenLabs")
+            logger.info("⚠️ Skipping audio generation - no ElevenLabs key")
         
-        # 6. Przygotuj źródła
+        # 6. Prepare sources
         sources = []
         for doc in context_docs:
             sources.append({
@@ -185,102 +197,124 @@ async def get_more_information(request: GetMoreInformationRequest):
                 "score": doc.get("score", 0)
             })
         
-        logger.info(f"🎉 Przetwarzanie zakończone - odpowiedź gotowa (audio: {'tak' if audio_url else 'nie'})")
+        logger.info(f"🎉 Processing completed - response ready (audio: {'yes' if audio_url else 'no'})")
         
         return GetMoreInformationResponse(
             answer=answer,
             audio_url=audio_url,
-            confidence=0.8 if context_docs else 0.0,
-            sources=sources
+            confidence=conversation_summary.confidence,
+            sources=sources,
+            needs_clarification=False
         )
         
     except Exception as e:
-        logger.error(f"Błąd w get_more_information: {e}")
+        logger.error(f"Error in get_more_information: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/summarize-conversation", response_model=ConversationSummaryResponse)
+async def summarize_conversation(request: ConversationSummaryRequest):
+    """Endpoint for testing conversation summary"""
+    try:
+        logger.info("🧠 Testing conversation summary...")
+        
+        # Convert conversation to LLM format
+        conversation_messages = []
+        for msg in request.conversation.get("messages", []):
+            conversation_messages.append({
+                "role": msg.get("role", "user"),
+                "content": msg.get("content", "")
+            })
+        
+        # Summarize conversation
+        summary = await llm_service.summarize_conversation(conversation_messages)
+        
+        return ConversationSummaryResponse(
+            summary=summary,
+            success=True,
+            message="Conversation summary generated successfully"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error during conversation summarization: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/upload_documents", response_model=DocumentUploadResponse)
 async def upload_documents(files: List[UploadFile] = File(...)):
-    """Endpoint do wrzucania dokumentów"""
+    """Endpoint for uploading documents"""
     try:
         total_documents = 0
         
         for file in files:
-            # Sprawdź rozmiar pliku
+            # Check file size
             if file.size > Config.MAX_FILE_SIZE * 1024 * 1024:
                 raise HTTPException(
                     status_code=400, 
-                    detail=f"Plik {file.filename} jest za duży. Maksymalny rozmiar: {Config.MAX_FILE_SIZE}MB"
+                    detail=f"File {file.filename} is too large. Maximum size: {Config.MAX_FILE_SIZE}MB"
                 )
             
-            # Zapisz plik tymczasowo
+            # Save file temporarily
             with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
                 content = await file.read()
                 temp_file.write(content)
                 temp_file_path = temp_file.name
             
             try:
-                # Przetwórz dokument
+                # Process document
                 documents = await document_processor.process_file(temp_file_path, file.filename)
                 
                 if documents:
-                    # Dodaj do vector store
+                    # Add to vector store
                     added_count = await vector_store.add_documents(documents)
                     total_documents += added_count
-                    logger.info(f"Dodano {added_count} fragmentów z pliku {file.filename}")
+                    logger.info(f"Added {added_count} fragments from file {file.filename}")
                 
             finally:
-                # Usuń plik tymczasowy
+                # Delete temporary file
                 os.unlink(temp_file_path)
         
         return DocumentUploadResponse(
             success=True,
-            message=f"Pomyślnie dodano {total_documents} fragmentów dokumentów",
+            message=f"Successfully added {total_documents} document fragments",
             document_count=total_documents
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Błąd podczas wrzucania dokumentów: {e}")
+        logger.error(f"Error uploading documents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/documents/info")
 async def get_documents_info():
-    """Zwraca informacje o dokumentach w bazie"""
+    """Returns information about documents in database"""
     try:
+        logger.info("📊 Retrieving document information...")
         info = await vector_store.get_collection_info()
+        logger.info(f"📊 Document information: {info}")
         return info
     except Exception as e:
-        logger.error(f"Błąd podczas pobierania informacji o dokumentach: {e}")
+        logger.error(f"Error retrieving document information: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/cleanup-audio")
-async def cleanup_audio():
-    """Czyści stare pliki audio"""
-    try:
-        await audio_service.cleanup_old_audio_files()
-        return {"message": "Pomyślnie wyczyszczono stare pliki audio"}
-    except Exception as e:
-        logger.error(f"Błąd podczas czyszczenia audio: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/generate-audio")
 async def generate_audio(request: Dict):
-    """Generuje audio z tekstu"""
+    """Generates audio from text"""
     try:
         text = request.get("text", "")
         if not text:
-            raise HTTPException(status_code=400, detail="Brak tekstu do konwersji")
+            raise HTTPException(status_code=400, detail="No text to convert")
         
         audio_url = await audio_service.generate_speech(text)
         return {"audio_url": audio_url}
     except Exception as e:
-        logger.error(f"Błąd podczas generowania audio: {e}")
-        raise HTTPException(status_code=500, detail="Błąd podczas generowania audio")
+        logger.error(f"Error generating audio: {e}")
+        raise HTTPException(status_code=500, detail="Error generating audio")
 
 @app.get("/audio/{filename}")
 async def get_audio_file(filename: str):
-    """Pobiera plik audio"""
+    """Retrieves audio file"""
     try:
         import os
         from fastapi.responses import FileResponse
@@ -289,87 +323,91 @@ async def get_audio_file(filename: str):
         if os.path.exists(audio_path):
             return FileResponse(audio_path, media_type="audio/mpeg")
         else:
-            raise HTTPException(status_code=404, detail="Plik audio nie znaleziony")
+            raise HTTPException(status_code=404, detail="Audio file not found")
     except Exception as e:
-        logger.error(f"Błąd podczas pobierania pliku audio: {e}")
-        raise HTTPException(status_code=500, detail="Błąd podczas pobierania pliku audio")
+        logger.error(f"Error retrieving audio file: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving audio file")
 
 @app.post("/chat-with-json")
 async def chat_with_json(json_data: Dict):
-    """Chat z LLM na podstawie danych JSON"""
+    """Chat with LLM based on JSON data"""
     try:
-        # Konwertuj JSON na tekst
+        # Convert JSON to text
         json_text = json.dumps(json_data, indent=2, ensure_ascii=False)
         
-        # Przygotuj wiadomość dla LLM
+        # Prepare message for LLM
         system_prompt = """
-        Jesteś pomocnym asystentem. Przeanalizuj podane dane JSON i odpowiedz na pytania użytkownika.
+        You are a helpful assistant. Analyze the provided JSON data and answer user questions.
         
-        Odpowiedzi MUSZĄ być w formacie:
+        Responses MUST be in format:
         
-        **TLDR:** [Jedna linia z szybką, zwięzłą odpowiedzią]
+        **TLDR:** [One line with quick, concise answer]
         
-        **Opis:** [Szczegółowy opis z dodatkowymi informacjami, kontekstem i wyjaśnieniami]
+        **Description:** [Detailed description with additional information, context and explanations]
         
-        Odpowiedzi powinny być:
-        - Dokładne i oparte na danych z JSON
-        - TLDR powinien być bardzo zwięzły (1-2 zdania)
-        - Opis może być dłuższy i zawierać szczegóły
-        - W języku polskim
+        Responses should be:
+        - Accurate and based on JSON data
+        - TLDR should be very concise (1-2 sentences)
+        - Description can be longer and contain details
+        - In English
         """
         
-        # Wywołaj LLM
+        # Call LLM
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Przeanalizuj te dane JSON i odpowiedz na pytania:\n\n{json_text}"}
+            {"role": "user", "content": f"Analyze this JSON data and answer questions:\n\n{json_text}"}
         ]
         
-        # Użyj LLMService do generowania odpowiedzi
+        # Use LLMService to generate response
         response = await llm_service.answer_with_context("", [{"content": json_text}])
         
-        # Generuj audio tylko dla TLDR (opcjonalnie)
+        # Generate audio only for TLDR (optional)
         audio_url = None
         if Config.ELEVENLABS_API_KEY:
-            logger.info("🎵 Generowanie audio dla TLDR z JSON...")
+            logger.info("🎵 Generating audio for TLDR from JSON...")
             
-            # Wyciągnij TLDR z odpowiedzi
+            # Extract TLDR from response
             tldr_text = ""
             if "**TLDR:**" in response:
-                tldr_part = response.split("**Opis:**")[0]
+                tldr_part = response.split("**Description:**")[0]
                 tldr_text = tldr_part.replace("**TLDR:**", "").strip()
-                logger.info(f"📋 TLDR do audio: '{tldr_text[:50]}...'")
+                logger.info(f"📋 TLDR for audio: '{tldr_text[:50]}...'")
             else:
-                # Jeśli nie ma formatu TLDR, użyj całej odpowiedzi
+                # If no TLDR format, use entire response
                 tldr_text = response
-                logger.info(f"📋 Używam całej odpowiedzi do audio: '{tldr_text[:50]}...'")
+                logger.info(f"📋 Using entire response for audio: '{tldr_text[:50]}...'")
             
             audio_url = await audio_service.generate_speech(tldr_text)
             if audio_url:
-                logger.info(f"✅ Audio wygenerowane dla TLDR: {audio_url}")
+                logger.info(f"✅ Audio generated for TLDR: {audio_url}")
             else:
-                logger.warning("⚠️ Nie udało się wygenerować audio")
+                logger.warning("⚠️ Failed to generate audio")
         
         return {"answer": response, "audio_url": audio_url}
         
     except Exception as e:
-        logger.error(f"Błąd podczas przetwarzania JSON: {e}")
-        raise HTTPException(status_code=500, detail="Błąd podczas przetwarzania JSON")
+        logger.error(f"Error processing JSON: {e}")
+        raise HTTPException(status_code=500, detail="Error processing JSON")
 
-# Endpointy do zarządzania plikami
+# File management endpoints
 @app.post("/files/upload", response_model=FileUploadResponse, tags=["Files"])
 async def upload_file(file: UploadFile = File(...)):
     """
-    Wrzuca pojedynczy plik do systemu.
+    Uploads a single file to the system.
     
-    - **file**: Plik do wrzucenia (PDF, TXT, DOCX)
+    - **file**: File to upload (PDF, TXT, DOCX)
     
-    Zwraca informacje o wrzuconym pliku.
+    Returns information about the uploaded file.
     """
     try:
+        logger.info(f"📤 Rozpoczynam wrzucanie pliku: {file.filename}")
+        
         # Sprawdź rozmiar pliku
         file_size = 0
         content = await file.read()
         file_size = len(content)
+        
+        logger.info(f"📏 Rozmiar pliku: {file_size} bajtów")
         
         if file_size > Config.MAX_FILE_SIZE * 1024 * 1024:
             raise HTTPException(
@@ -394,6 +432,8 @@ async def upload_file(file: UploadFile = File(...)):
         with open(file_path, "wb") as f:
             f.write(content)
         
+        logger.info(f"💾 Plik zapisany: {file_path}")
+        
         # Przygotuj informacje o pliku
         file_info = FileInfo(
             filename=file.filename,
@@ -402,6 +442,8 @@ async def upload_file(file: UploadFile = File(...)):
             content_type=file.content_type,
             path=str(file_path)
         )
+        
+        logger.info(f"✅ Plik wrzucony pomyślnie: {file.filename}")
         
         return FileUploadResponse(
             success=True,
@@ -433,28 +475,39 @@ async def list_files():
         # Utwórz katalog jeśli nie istnieje
         upload_dir.mkdir(exist_ok=True)
         
+        logger.info(f"📁 Skanowanie katalogu: {upload_dir}")
+        
         # Zbierz informacje o plikach
         for file_path in upload_dir.glob("*.*"):
             if file_path.suffix.lower() in ['.pdf', '.txt', '.docx']:
-                size = file_path.stat().st_size
-                created_at = datetime.fromtimestamp(file_path.stat().st_ctime)
-                
-                # Określ typ zawartości
-                content_type = {
-                    '.pdf': 'application/pdf',
-                    '.txt': 'text/plain',
-                    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-                }.get(file_path.suffix.lower(), 'application/octet-stream')
-                
-                file_info = FileInfo(
-                    filename=file_path.name,
-                    size=size,
-                    created_at=created_at,
-                    content_type=content_type,
-                    path=str(file_path)
-                )
-                files.append(file_info)
-                total_size += size
+                try:
+                    size = file_path.stat().st_size
+                    created_at = datetime.fromtimestamp(file_path.stat().st_ctime)
+                    
+                    # Określ typ zawartości
+                    content_type = {
+                        '.pdf': 'application/pdf',
+                        '.txt': 'text/plain',
+                        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                    }.get(file_path.suffix.lower(), 'application/octet-stream')
+                    
+                    file_info = FileInfo(
+                        filename=file_path.name,
+                        size=size,
+                        created_at=created_at,
+                        content_type=content_type,
+                        path=str(file_path)
+                    )
+                    files.append(file_info)
+                    total_size += size
+                    
+                    logger.info(f"📄 Znaleziono plik: {file_path.name} ({size} bajtów)")
+                    
+                except Exception as file_error:
+                    logger.warning(f"⚠️ Błąd podczas przetwarzania pliku {file_path.name}: {file_error}")
+                    continue
+        
+        logger.info(f"📊 Znaleziono {len(files)} plików, łącznie {total_size} bajtów")
         
         return FileListResponse(
             files=sorted(files, key=lambda x: x.created_at, reverse=True),

@@ -1,1 +1,1 @@
-# SimplyBot - Bot dialogowy z RAG 
+# SimplyBot - RAG Chatbot 

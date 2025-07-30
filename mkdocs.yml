@@ -1,0 +1,50 @@
+site_name: SimplyBot
+site_description: Inteligentny chatbot RAG z analizą dokumentów
+site_author: SimplyBot Team
+site_url: https://your-username.github.io/SimplyBot/
+
+repo_name: your-username/SimplyBot
+repo_url: https://github.com/your-username/SimplyBot
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: pl
+  palette:
+    - media: "(prefers-color-scheme)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch
+        name: Przełącz motyw
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Przełącz motyw
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.mermaid:
+      arguments:
+        theme: default
+
+nav:
+  - Strona główna: index.md
+  - Architektura: architecture.md
+  - Instalacja: installation.md
+  - Użycie: usage.md 

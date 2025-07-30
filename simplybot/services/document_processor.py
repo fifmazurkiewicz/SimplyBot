@@ -13,12 +13,12 @@ class DocumentProcessor:
         self.supported_extensions = ['.pdf', '.txt', '.docx']
     
     async def process_file(self, file_path: str, filename: str) -> List[Dict[str, Any]]:
-        """Przetwarza plik i zwraca listę dokumentów"""
+        """Processes file and returns list of documents"""
         try:
             file_extension = os.path.splitext(filename)[1].lower()
             
             if file_extension not in self.supported_extensions:
-                raise ValueError(f"Nieobsługiwany format pliku: {file_extension}")
+                raise ValueError(f"Unsupported file format: {file_extension}")
             
             if file_extension == '.pdf':
                 return await self._process_pdf(file_path, filename)
@@ -28,7 +28,7 @@ class DocumentProcessor:
                 return await self._process_docx(file_path, filename)
                 
         except Exception as e:
-            logger.error(f"Błąd podczas przetwarzania pliku {filename}: {e}")
+            logger.error(f"Error processing file {filename}: {e}")
             return []
     
     async def _process_pdf(self, file_path: str, filename: str) -> List[Dict[str, Any]]:

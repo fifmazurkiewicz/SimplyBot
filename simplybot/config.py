@@ -20,14 +20,14 @@ class Config:
     
     # ElevenLabs
     ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-    ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # Rachel voice
+    ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  
     
     # App settings
     MAX_TOKENS = int(os.getenv("MAX_TOKENS", "1000"))
     TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
     
     # Embedding settings
-    EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "openai")  # "openai" lub "bge"
+    EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "openai")
     BGE_MODEL_NAME = os.getenv("BGE_MODEL_NAME", "BAAI/bge-m3")
     OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large")
     

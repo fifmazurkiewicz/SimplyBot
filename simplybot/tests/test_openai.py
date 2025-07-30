@@ -6,10 +6,10 @@ from simplybot.config import Config
 from simplybot.services.llm_service import LLMService
 
 def test_openai_connection():
-    """Testuje połączenie z OpenAI API"""
+    """Tests connection to OpenAI API"""
     try:
         if not Config.OPENAI_API_KEY:
-            print("❌ Brak klucza OpenAI API - ustaw OPENAI_API_KEY w zmiennych środowiskowych")
+            print("❌ No OpenAI API key - set OPENAI_API_KEY in environment variables")
             return False
         
         client = OpenAI(api_key=Config.OPENAI_API_KEY)
@@ -24,13 +24,13 @@ def test_openai_connection():
             temperature=0.7
         )
         
-        print("✅ Połączenie z OpenAI działa poprawnie!")
+        print("✅ OpenAI connection works correctly!")
         print(f"   Model: {Config.OPENAI_MODEL}")
-        print(f"   Odpowiedź: {response.choices[0].message.content}")
+        print(f"   Response: {response.choices[0].message.content}")
         return True
         
     except Exception as e:
-        print(f"❌ Błąd połączenia z OpenAI: {e}")
+        print(f"❌ OpenAI connection error: {e}")
         return False
 
 async def test_llm_service():

@@ -7,9 +7,9 @@ from datetime import datetime
 from typing import List, Dict, Any
 import tempfile
 
-# Konfiguracja strony
+# Page configuration
 st.set_page_config(
-    page_title="SimplyBot - Bot Dialogowy z RAG",
+    page_title="SimplyBot - RAG Chatbot",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -19,15 +19,15 @@ st.set_page_config(
 API_BASE_URL = "http://localhost:8000"
 
 def check_api_health():
-    """Sprawdza stan API"""
+    """Checks API status"""
     try:
         response = requests.get(f"{API_BASE_URL}/")
         return response.json()
-    except:
+    except Exception:
         return None
 
 def upload_documents(files):
-    """Wrzuca dokumenty do API"""
+    """Uploads documents to API"""
     try:
         files_data = []
         for file in files:
@@ -39,7 +39,7 @@ def upload_documents(files):
         return {"success": False, "message": str(e)}
 
 def get_more_information(conversation):
-    """Wysyła rozmowę do API i otrzymuje odpowiedź"""
+    """Sends conversation to API and receives response"""
     try:
         payload = {
             "conversation": {
@@ -54,15 +54,20 @@ def get_more_information(conversation):
         return {"answer": f"Błąd: {str(e)}", "audio_url": None}
 
 def get_documents_info():
-    """Pobiera informacje o dokumentach"""
+    """Retrieves document information"""
     try:
         response = requests.get(f"{API_BASE_URL}/documents/info")
-        return response.json()
-    except:
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"Błąd API: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        print(f"Błąd połączenia: {e}")
         return None
 
 def generate_audio_from_text(text):
-    """Generuje audio z tekstu"""
+    """Generates audio from text"""
     try:
         response = requests.post(f"{API_BASE_URL}/generate-audio", json={"text": text})
         result = response.json()
@@ -80,14 +85,14 @@ def generate_audio_from_text(text):
         return {"audio_url": None, "error": str(e)}
 
 def chat_with_json(json_data):
-    """Chat z LLM na podstawie danych JSON"""
+    """Chat with LLM based on JSON data"""
     try:
         response = requests.post(f"{API_BASE_URL}/chat-with-json", json=json_data)
         return response.json()
     except Exception as e:
         return {"answer": f"Błąd: {str(e)}"}
 
-# Inicjalizacja sesji
+# Session initialization
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "session_id" not in st.session_state:
@@ -95,16 +100,16 @@ if "session_id" not in st.session_state:
 if "example_json" not in st.session_state:
     st.session_state.example_json = ""
 
-# Nagłówek
-st.title("🤖 SimplyBot - Bot Dialogowy z RAG")
-st.markdown("Bot wykorzystujący LangChain, Qdrant i ElevenLabs do inteligentnych odpowiedzi")
+# Header
+st.title("🤖 SimplyBot - RAG Chatbot")
+st.markdown("Bot using LangChain, Qdrant and ElevenLabs for intelligent responses")
 
 # Sidebar
 with st.sidebar:
-    st.header("🔧 Panel Sterowania")
+    st.header("🔧 Control Panel")
     
-    # Status API
-    st.subheader("Status API")
+    # API Status
+    st.subheader("API Status")
     health = check_api_health()
     if health:
         st.success("✅ API dostępne")
@@ -125,26 +130,31 @@ with st.sidebar:
                     else:
                         st.error(f"❌ {service.upper()}")
     else:
-        st.error("❌ API niedostępne")
+        st.error("❌ API unavailable")
     
-    # Informacje o dokumentach
-    st.subheader("📚 Dokumenty")
+    # Document information
+    st.subheader("📚 Documents")
     docs_info = get_documents_info()
     if docs_info and "vectors_count" in docs_info:
-        st.info(f"Liczba fragmentów: {docs_info['vectors_count']}")
+        vectors_count = docs_info['vectors_count']
+        if vectors_count is not None:
+            if vectors_count > 0:
+                st.success(f"✅ Fragment count: {vectors_count}")
+        else:
+            st.info(f"📚 Fragment count: {vectors_count} (no documents)")
     else:
-        st.warning("Brak informacji o dokumentach")
+        st.warning("⚠️ No document information")
     
-    # Wrzucanie dokumentów
-    st.subheader("📁 Wrzuć Dokumenty")
+    # Document upload
+    st.subheader("📁 Upload Documents")
     uploaded_files = st.file_uploader(
-        "Wybierz pliki (PDF, TXT, DOCX)",
+        "Select files (PDF, TXT, DOCX)",
         type=["pdf", "txt", "docx"],
         accept_multiple_files=True
     )
     
-    if uploaded_files and st.button("Wrzuć dokumenty"):
-        with st.spinner("Przetwarzanie dokumentów..."):
+    if uploaded_files and st.button("Upload documents"):
+        with st.spinner("Processing documents..."):
             result = upload_documents(uploaded_files)
             if result.get("success"):
                 st.success(result["message"])
@@ -152,86 +162,77 @@ with st.sidebar:
             else:
                 st.error(result["message"])
     
-    # Czyszczenie audio
-    if st.button("🧹 Wyczyść stare pliki audio"):
-        try:
-            response = requests.post(f"{API_BASE_URL}/cleanup-audio")
-            if response.status_code == 200:
-                st.success("Wyczyszczono stare pliki audio")
-            else:
-                st.error("Błąd podczas czyszczenia")
-        except:
-            st.error("Nie udało się połączyć z API")
 
-# Tabs dla różnych funkcji
-tab1, tab2 = st.tabs(["💬 Chat z Botem", "📊 Analiza JSON"])
+
+# Tabs for different functions
+tab1, tab2 = st.tabs(["💬 Chat with Bot", "📊 JSON Analysis"])
 
 with tab1:
-    st.header("💬 Rozmowa z Botem")
+    st.header("💬 Chat with Bot")
     
-    # Wyświetl historię wiadomości
+    # Display message history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            # Sprawdź czy odpowiedź ma format TLDR + Opis
+            # Check if response has TLDR + Description format
             content = message["content"]
-            if message["role"] == "assistant" and "**TLDR:**" in content and "**Opis:**" in content:
-                # Podziel odpowiedź na TLDR i Opis
-                parts = content.split("**Opis:**")
+            if message["role"] == "assistant" and "**TLDR:**" in content and "**Description:**" in content:
+                # Split response into TLDR and Description
+                parts = content.split("**Description:**")
                 if len(parts) == 2:
                     tldr_part = parts[0].replace("**TLDR:**", "").strip()
-                    opis_part = parts[1].strip()
+                    description_part = parts[1].strip()
                     
-                    # Wyświetl TLDR w kolorze
+                    # Display TLDR in color
                     st.markdown(f"**📋 TLDR:** {tldr_part}")
                     st.markdown("---")
-                    st.markdown(f"**📖 Opis:** {opis_part}")
+                    st.markdown(f"**📖 Description:** {description_part}")
                 else:
                     st.write(content)
             else:
                 st.write(content)
             
-            # Wyświetl audio jeśli dostępne
+            # Display audio if available
             if message.get("audio_url"):
                 try:
-                    # Wyciągnij nazwę pliku z URL
+                    # Extract filename from URL
                     filename = message["audio_url"].split("/")[-1]
-                    # Spróbuj pobrać plik audio
+                    # Try to download audio file
                     audio_response = requests.get(f"{API_BASE_URL}/audio/{filename}")
                     if audio_response.status_code == 200:
-                        # Automatyczne odtwarzanie audio dla historii
+                        # Automatic audio playback for history
                         audio_base64 = base64.b64encode(audio_response.content).decode('utf-8')
                         st.markdown(
                             f"""
                             <audio controls style="width: 100%; margin: 10px 0;">
                                 <source src="data:audio/mp3;base64,{audio_base64}" type="audio/mp3">
-                                Twoja przeglądarka nie obsługuje odtwarzania audio.
+                                Your browser doesn't support audio playback.
                             </audio>
                             """,
                             unsafe_allow_html=True
                         )
-                        # Przycisk do ponownego odtwarzania
-                        if st.button("🔊 Odtwórz ponownie", key=f"replay_{message.get('id', 'unknown')}"):
+                        # Button for replay
+                        if st.button("🔊 Play again", key=f"replay_{message.get('id', 'unknown')}"):
                             st.markdown(
                                 f"""
                                 <audio controls autoplay style="width: 100%; margin: 10px 0;">
                                     <source src="data:audio/mp3;base64,{audio_base64}" type="audio/mp3">
-                                    Twoja przeglądarka nie obsługuje odtwarzania audio.
+                                    Your browser doesn't support audio playback.
                                 </audio>
                                 """,
                                 unsafe_allow_html=True
                             )
                     else:
-                        st.warning("⚠️ Plik audio niedostępny")
+                        st.warning("⚠️ Audio file unavailable")
                 except:
-                    st.warning("⚠️ Plik audio niedostępny")
+                    st.warning("⚠️ Audio file unavailable")
 
 with tab2:
-    st.header("📊 Analiza JSON z LLM")
-    st.markdown("Wklej dane JSON i otrzymaj analizę od AI")
+    st.header("📊 JSON Analysis with LLM")
+    st.markdown("Paste JSON data and get AI analysis")
     
     # Input JSON
     json_input = st.text_area(
-        "Wklej dane JSON:",
+        "Paste JSON data:",
         height=200,
         placeholder='{"name": "example", "value": 123}',
         value=st.session_state.example_json
@@ -264,13 +265,13 @@ with tab2:
                                 
                                 # Wyświetl TLDR w kolorze
                                 st.markdown(f"**📋 TLDR:** {tldr_part}")
-                                                        st.markdown("---")
-                        st.markdown(f"**📖 Opis:** {opis_part}")
-                        st.info("💡 Audio jest generowane tylko dla części TLDR")
-                    else:
-                        st.write(answer_text)
-                else:
-                    st.write(answer_text)
+                                st.markdown("---")
+                                st.markdown(f"**📖 Opis:** {opis_part}")
+                                st.info("💡 Audio jest generowane tylko dla części TLDR")
+                            else:
+                                st.write(answer_text)
+                        else:
+                            st.write(answer_text)
                         
                         # Przycisk do generowania audio
                         if st.button("🔊 Użyj głosu (TLDR)", key="voice_btn"):
@@ -283,6 +284,7 @@ with tab2:
                                     audio_response = generate_audio_from_text(tldr_text)
                                 else:
                                     audio_response = generate_audio_from_text(answer_text)
+                                
                                 if audio_response.get("audio_bytes"):
                                     st.success("✅ Audio wygenerowane dla TLDR!")
                                     # Automatyczne odtwarzanie audio
@@ -352,40 +354,45 @@ with tab2:
             st.session_state.example_json = json.dumps(example_json, indent=2)
             st.rerun()
 
-# Input użytkownika
-if prompt := st.chat_input("Napisz wiadomość..."):
-    # Dodaj wiadomość użytkownika
+# User input
+if prompt := st.chat_input("Write a message..."):
+    # Add user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     
     with st.chat_message("user"):
         st.write(prompt)
     
-    # Generuj odpowiedź
+    # Generate response
     with st.chat_message("assistant"):
-        with st.spinner("Bot myśli..."):
+        with st.spinner("Bot is thinking..."):
             response = get_more_information(st.session_state.messages)
             
             if "answer" in response:
-                # Sprawdź czy odpowiedź ma format TLDR + Opis
+                # Check if response requires clarification
+                if response.get("needs_clarification", False):
+                    st.warning("🤔 Bot needs more information:")
+                    st.info(f"**Confidence:** {response.get('confidence', 0):.1%}")
+                
+                # Check if response has TLDR + Description format
                 answer_text = response["answer"]
-                if "**TLDR:**" in answer_text and "**Opis:**" in answer_text:
-                    # Podziel odpowiedź na TLDR i Opis
-                    parts = answer_text.split("**Opis:**")
+                if "**TLDR:**" in answer_text and "**Description:**" in answer_text:
+                    # Split response into TLDR and Description
+                    parts = answer_text.split("**Description:**")
                     if len(parts) == 2:
                         tldr_part = parts[0].replace("**TLDR:**", "").strip()
-                        opis_part = parts[1].strip()
+                        description_part = parts[1].strip()
                         
-                        # Wyświetl TLDR w kolorze
+                        # Display TLDR in color
                         st.markdown(f"**📋 TLDR:** {tldr_part}")
                         st.markdown("---")
-                        st.markdown(f"**📖 Opis:** {opis_part}")
-                        st.info("💡 Audio jest generowane tylko dla części TLDR")
+                        st.markdown(f"**📖 Description:** {description_part}")
+                        st.info("💡 Audio is generated only for TLDR part")
                     else:
                         st.write(answer_text)
                 else:
                     st.write(answer_text)
                 
-                # Dodaj odpowiedź do historii
+                # Add response to history
                 bot_message = {
                     "role": "assistant", 
                     "content": response["answer"],
@@ -393,52 +400,52 @@ if prompt := st.chat_input("Napisz wiadomość..."):
                 }
                 st.session_state.messages.append(bot_message)
                 
-                # Wyświetl audio jeśli dostępne
+                # Display audio if available
                 if response.get("audio_url"):
                     try:
-                        # Wyciągnij nazwę pliku z URL
+                        # Extract filename from URL
                         filename = response["audio_url"].split("/")[-1]
-                        # Spróbuj pobrać plik audio
+                        # Try to download audio file
                         audio_response = requests.get(f"{API_BASE_URL}/audio/{filename}")
                         if audio_response.status_code == 200:
-                            # Automatyczne odtwarzanie audio
+                            # Automatic audio playback
                             audio_base64 = base64.b64encode(audio_response.content).decode('utf-8')
                             st.markdown(
                                 f"""
                                 <audio controls autoplay style="width: 100%; margin: 10px 0;">
                                     <source src="data:audio/mp3;base64,{audio_base64}" type="audio/mp3">
-                                    Twoja przeglądarka nie obsługuje odtwarzania audio.
+                                    Your browser doesn't support audio playback.
                                 </audio>
                                 """,
                                 unsafe_allow_html=True
                             )
                         else:
-                            st.warning("⚠️ Plik audio niedostępny")
+                            st.warning("⚠️ Audio file unavailable")
                     except:
-                        st.warning("⚠️ Plik audio niedostępny")
+                        st.warning("⚠️ Audio file unavailable")
                 
-                # Wyświetl źródła jeśli dostępne
+                # Display sources if available
                 if response.get("sources"):
-                    with st.expander("📚 Źródła"):
+                    with st.expander("📚 Sources"):
                         for i, source in enumerate(response["sources"]):
-                            st.markdown(f"**Źródło {i+1}:**")
+                            st.markdown(f"**Source {i+1}:**")
                             st.write(f"Fragment: {source['content']}")
                             if source.get("metadata"):
-                                st.write(f"Plik: {source['metadata'].get('source', 'Nieznany')}")
-                            st.write(f"Powiązanie: {source.get('score', 0):.2f}")
+                                st.write(f"File: {source['metadata'].get('source', 'Unknown')}")
+                            st.write(f"Relevance: {source.get('score', 0):.2f}")
                             st.divider()
             else:
-                st.error("Błąd podczas generowania odpowiedzi")
+                st.error("Error generating response")
 
-# Przycisk do czyszczenia historii
-if st.button("🗑️ Wyczyść historię"):
+# Clear history button
+if st.button("🗑️ Clear history"):
     st.session_state.messages = []
     st.rerun()
 
-# Informacje o sesji
+# Session information
 st.sidebar.markdown("---")
-st.sidebar.markdown(f"**ID Sesji:** {st.session_state.session_id}")
-st.sidebar.markdown(f"**Liczba wiadomości:** {len(st.session_state.messages)}")
+st.sidebar.markdown(f"**Session ID:** {st.session_state.session_id}")
+st.sidebar.markdown(f"**Message count:** {len(st.session_state.messages)}")
 
 # Footer
 st.markdown("---")
